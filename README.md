@@ -22,7 +22,7 @@
 
 **Settings.** `config.json` only says where the database is; everything else is in the database and is changed through the web UI (`mail.int`) or `stalwart-cli` against `https://mail.int.bulbashenko.com` with an API key. `stalwart-cli snapshot <types…>` exports settings as an idempotent plan for `stalwart-cli apply` (secrets come back as `****` and must be supplied separately).
 
-**Upgrade.** Change the image tag (PR), then promote the commit in infra. Read the release notes first: Stalwart migrates its schema on start.
+**Upgrade.** Change the image tag (PR). After it merges, CI opens the deploy PR `deploy/mail` in infra; merging that rolls it out. Read the release notes first: Stalwart migrates its schema on start.
 
 **Restore.** Restore the Postgres database (CNPG recovery from the barman object store), then start this Deployment. Moving to another node = move the role=mail label *and* the IP (or update MX/SPF/PTR).
 
