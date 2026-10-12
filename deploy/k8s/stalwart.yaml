@@ -1,0 +1,100 @@
+# Stalwart mail server. Stateless pod: settings, accounts, mail and blobs live in Postgres (config.json).
+# What ties it to a node is the public IP: MX, SPF and the PTR of mail.bulbashenko.com point at it, so the
+# pod runs on the node labelled node.bulbashenko.com/role=mail and takes the mail ports as host ports.
+# The deploying repo (bulbashenko-com/infra) provides the namespace and the Secret `stalwart`
+# (STALWART_DB_PASSWORD, CF_DNS_API_TOKEN).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stalwart
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: stalwart }
+  template:
+    metadata:
+      labels: { app: stalwart }
+    spec:
+      nodeSelector:
+        node.bulbashenko.com/role: mail
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 2000
+        runAsGroup: 2000
+        fsGroup: 2000
+        seccompProfile: { type: RuntimeDefault }
+        # Mail ports are below 1024; allow binding them without root or capabilities (namespaced sysctl).
+        sysctls:
+          - { name: net.ipv4.ip_unprivileged_port_start, value: "0" }
+      containers:
+        - name: stalwart
+          image: stalwartlabs/stalwart:v0.16.23
+          args: ["--config", "/etc/stalwart/config.json"]
+          env:
+            - { name: STALWART_PUBLIC_URL, value: "https://mail.int.bulbashenko.com" }
+          envFrom:
+            - secretRef: { name: stalwart }
+          ports:
+            - { name: smtp, containerPort: 25, hostPort: 25 }
+            - { name: submissions, containerPort: 465, hostPort: 465 }
+            - { name: imaps, containerPort: 993, hostPort: 993 }
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            tcpSocket: { port: smtp }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests: { cpu: 50m, memory: 192Mi }
+            limits: { memory: 1Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: config, mountPath: /etc/stalwart }
+            # Scratch space and the file tracer (/var/lib/stalwart/logs); nothing durable lives here.
+            - { name: scratch, mountPath: /var/lib/stalwart }
+      volumes:
+        - name: config
+          configMap: { name: stalwart-config }
+        - { name: scratch, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart
+spec:
+  selector: { app: stalwart }
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+---
+# Public, through Cloudflare Tunnel -> Traefik `web`: only the client auto-configuration endpoints.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: stalwart-autoconfig
+spec:
+  entryPoints: [web]
+  routes:
+    - match: Host(`autoconfig.bulbashenko.com`) && (PathPrefix(`/mail/`) || PathPrefix(`/.well-known/autoconfig/`))
+      services: [{ name: stalwart, port: 8080 }]
+    - match: Host(`autodiscover.bulbashenko.com`) && PathRegexp(`(?i)^/autodiscover/`)
+      services: [{ name: stalwart, port: 8080 }]
+---
+# Admin and web UI: mesh only, behind Ory Oathkeeper (rule mesh-admin-uis), then Stalwart's own OIDC sign-in.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: stalwart-admin
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`mail.int.bulbashenko.com`)
+      middlewares:
+        - { name: mesh-only, namespace: kube-system }
+        - { name: forward-auth, namespace: auth }
+      services: [{ name: stalwart, port: 8080 }]
+  tls: {}

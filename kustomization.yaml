@@ -1,0 +1,10 @@
+# Kubernetes base for the Stalwart mail server, consumed by bulbashenko-com/infra (Flux GitRepository pinned
+# to a commit). The deploying side supplies the namespace, the node label and the Secret `stalwart`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deploy/k8s/stalwart.yaml
+configMapGenerator:
+  - name: stalwart-config
+    files:
+      - deploy/k8s/config.json
