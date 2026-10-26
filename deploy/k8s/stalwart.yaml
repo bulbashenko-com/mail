@@ -1,8 +1,9 @@
 # Stalwart mail server. Stateless pod: settings, accounts, mail and blobs live in Postgres (config.json).
 # What ties it to a node is the public IP: MX, SPF and the PTR of mail.bulbashenko.com point at it, so the
 # pod runs on the node labelled node.bulbashenko.com/role=mail and takes the mail ports as host ports.
-# The deploying repo (bulbashenko-com/infra) provides the namespace and the Secret `stalwart`
-# (STALWART_DB_PASSWORD, CF_DNS_API_TOKEN).
+# The deploying repo (bulbashenko-com/infra) provides the namespace, the Secret `stalwart`
+# (STALWART_DB_PASSWORD, CF_DNS_API_TOKEN) and the ConfigMap `ca-bundle` (public roots + the internal CA
+# that signs the Postgres server certificate).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,6 +34,9 @@ spec:
           args: ["--config", "/etc/stalwart/config.json"]
           env:
             - { name: STALWART_PUBLIC_URL, value: "https://mail.int.bulbashenko.com" }
+            # rustls reads this file instead of the system store: public roots plus our internal CA, so the
+            # Postgres certificate verifies and outbound TLS (SMTP, ACME, OIDC) keeps working.
+            - { name: SSL_CERT_FILE, value: /etc/ca-bundle/ca-certificates.crt }
           envFrom:
             - secretRef: { name: stalwart }
           ports:
@@ -57,11 +61,15 @@ spec:
             capabilities: { drop: [ALL], add: [NET_BIND_SERVICE] }
           volumeMounts:
             - { name: config, mountPath: /etc/stalwart }
+            - { name: ca-bundle, mountPath: /etc/ca-bundle, readOnly: true }
             # Scratch space and the file tracer (/var/lib/stalwart/logs); nothing durable lives here.
             - { name: scratch, mountPath: /var/lib/stalwart }
       volumes:
         - name: config
           configMap: { name: stalwart-config }
+        # trust-manager puts ConfigMap ca-bundle into every namespace (bulbashenko-com/infra).
+        - name: ca-bundle
+          configMap: { name: ca-bundle }
         - { name: scratch, emptyDir: {} }
 ---
 apiVersion: v1
