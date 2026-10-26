@@ -6,6 +6,6 @@
   "authUsername": "stalwart",
   "authSecret": { "@type": "EnvironmentVariable", "variableName": "STALWART_DB_PASSWORD" },
   "useTls": true,
-  "allowInvalidCerts": true,
+  "allowInvalidCerts": false,
   "poolMaxConnections": 10
 }
