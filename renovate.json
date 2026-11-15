@@ -1,0 +1,8 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["local>bulbashenko-com/infra:renovate-preset"],
+  "description": "Policy: infra renovate-preset.json. The server image migrates its data on start and has no staging copy: image updates are never merged automatically (read the release notes first).",
+  "packageRules": [
+    { "matchDatasources": ["docker"], "automerge": false }
+  ]
+}
